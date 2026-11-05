@@ -53,6 +53,20 @@ const TOOLCHAIN_PREFLIGHT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const PRE_V3_MICROARCH_PENALTY: f64 = 0.5;
 const TOOLCHAIN_PREFLIGHT_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// How long one selection waits for a capability refresh it triggered. `RCH_SELECTION_REFRESH_SECS`,
+/// 1..=15, default 4; the probe itself keeps its own 15 s timeout and finishes in the background.
+fn selection_refresh_budget() -> Duration {
+    static BUDGET: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *BUDGET.get_or_init(|| {
+        rch_common::tunable_secs_env(
+            "RCH_SELECTION_REFRESH_SECS",
+            Duration::from_secs(4),
+            Duration::from_secs(1),
+            TOOLCHAIN_PREFLIGHT_COMMAND_TIMEOUT,
+        )
+    })
+}
+
 /// Weights for the selection scoring algorithm (legacy compatibility).
 #[derive(Debug, Clone)]
 pub struct SelectionWeights {
@@ -2317,9 +2331,17 @@ impl WorkerSelector {
             }));
         }
 
+        // A client's request never waits on the worker's SSH longer than this. A loaded worker took up to
+        // the 15 s probe timeout (one `worker_selection` of 15,757 ms against a 10 ms budget), stalling every hook. The
+        // probes are spawned tasks: when the wait ends they keep running and store the refreshed inventory when they
+        // finish, so the next request is admitted from fresh data. A refresh not seen to succeed in time recovers
+        // nothing, exactly like a failed probe: admission is never granted from stale or missing facts.
+        let deadline = tokio::time::Instant::now() + selection_refresh_budget();
         let mut any_recovered = false;
         for handle in handles {
-            let Ok(Some((worker, capabilities))) = handle.await else {
+            let Ok(Ok(Some((worker, capabilities)))) =
+                tokio::time::timeout_at(deadline, handle).await
+            else {
                 continue;
             };
             if component_request.is_none_or(|request| {

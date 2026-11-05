@@ -42,6 +42,20 @@ use tracing::debug;
 const CAPABILITIES_REFRESH_PROBE_TIMEOUT: Duration = Duration::from_secs(25);
 const CAPABILITIES_REFRESH_WORKER_BUDGET: Duration = Duration::from_secs(35);
 
+/// Delay before the early re-probe that follows a worker's first missed health probe.
+/// `RCH_FAILED_PROBE_RECHECK_SECS`, 1..=30, default 3; never longer than the normal probe interval.
+fn failed_probe_recheck() -> Duration {
+    static RECHECK: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *RECHECK.get_or_init(|| {
+        rch_common::tunable_secs_env(
+            "RCH_FAILED_PROBE_RECHECK_SECS",
+            Duration::from_secs(3),
+            Duration::from_secs(1),
+            Duration::from_secs(30),
+        )
+    })
+}
+
 fn duration_millis_i64(duration: Duration) -> i64 {
     i64::try_from(duration.as_millis()).unwrap_or(i64::MAX)
 }
@@ -1178,15 +1192,24 @@ impl WorkerState {
         if !permit.network.is_current() || !Arc::ptr_eq(&self.transport(), &permit.transport) {
             return None;
         }
-        Some(
-            self.record_transport_result_for(
-                &permit.transport,
-                connected,
-                normal_interval,
-                circuit,
-            )
-            .await,
-        )
+        let (was_down, down) = self
+            .record_transport_result_for(&permit.transport, connected, normal_interval, circuit)
+            .await;
+        if !connected && !down {
+            // The first missed health probe withdraws the worker from admission until the next
+            // successful probe, and on the normal cadence that is up to a full interval (30 s): every client got "all
+            // workers unreachable" for a one-off SSH stall. Look again soon instead. Nothing is relaxed: admission
+            // still needs a successful probe, the failure count and the circuit threshold are unchanged, and only the
+            // first failure books the early look (later ones keep the normal or recovery cadence). The historical
+            // endpoint recovery path does not come through here and keeps its shared clock.
+            let mut state = permit.transport.state.lock().await;
+            if state.failures == 1 {
+                state.next_probe = Some(TransportProbeDeadline::new(
+                    failed_probe_recheck().min(normal_interval),
+                ));
+            }
+        }
+        Some((was_down, down))
     }
 
     async fn record_transport_result_for(
@@ -3860,6 +3883,75 @@ mod tests {
             open_cooldown_secs: 900,
             ..Default::default()
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn first_missed_health_probe_books_an_early_recheck_and_later_ones_keep_the_cadence() {
+        let heartbeat = Duration::from_secs(30);
+        let circuit = historical_transport_policy();
+        let pool = WorkerPool::new().with_recovery_transport_policy(
+            circuit.clone(),
+            heartbeat,
+            Duration::from_secs(10),
+        );
+        let endpoint = recovered_worker_config("early-recheck", 4);
+        pool.add_worker(endpoint.clone()).await;
+        let worker = pool.get(&endpoint.id).await.unwrap();
+
+        // The first miss: not down, and the next look is early instead of a full heartbeat away.
+        let probe = worker
+            .health_probe_permit(heartbeat, &circuit)
+            .await
+            .expect("due");
+        assert_eq!(
+            worker
+                .record_health_transport_result(&probe, false, heartbeat, &circuit)
+                .await,
+            Some((false, false)),
+            "one miss never marks the worker down"
+        );
+        drop(probe);
+        assert_eq!(
+            worker.next_health_probe_in().await,
+            Some(failed_probe_recheck())
+        );
+        tokio::time::advance(failed_probe_recheck() - Duration::from_secs(1)).await;
+        assert!(
+            worker
+                .health_probe_permit(heartbeat, &circuit)
+                .await
+                .is_none(),
+            "not due early"
+        );
+        tokio::time::advance(Duration::from_secs(1)).await;
+
+        // The second miss keeps the normal cadence the permit books.
+        let probe = worker
+            .health_probe_permit(heartbeat, &circuit)
+            .await
+            .expect("due again");
+        assert_eq!(
+            worker
+                .record_health_transport_result(&probe, false, heartbeat, &circuit)
+                .await,
+            Some((false, false))
+        );
+        drop(probe);
+        assert_eq!(worker.next_health_probe_in().await, Some(heartbeat));
+
+        // The third consecutive miss is still the one that marks the worker down.
+        tokio::time::advance(heartbeat).await;
+        let probe = worker
+            .health_probe_permit(heartbeat, &circuit)
+            .await
+            .expect("third");
+        assert_eq!(
+            worker
+                .record_health_transport_result(&probe, false, heartbeat, &circuit)
+                .await,
+            Some((false, true)),
+            "failure_threshold 3 is unchanged"
+        );
     }
 
     #[tokio::test(start_paused = true)]
