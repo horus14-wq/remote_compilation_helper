@@ -24,7 +24,10 @@ import time
 import uuid
 
 POLL_SECONDS = 0.25
-FREE_SAMPLE_DEADLINE = 1.0
+# Was 1.0. Under CPU starvation (load ~40 on 18 cores) one statvfs
+# sample in this Python monitor took >1 s and RCH killed a healthy build with E330 'free-space telemetry deadline'.
+# Samples are still requested every POLL_SECONDS; only the declare-the-monitor-dead deadline is longer.
+FREE_SAMPLE_DEADLINE = 5.0
 # Was 2.0. Each full walk of a large cargo target cost 1-2 s of CPU per
 # build; the per-build output check now runs every 10 s. Free-space sampling (POLL_SECONDS) is unchanged.
 SCAN_INTERVAL = 10.0
