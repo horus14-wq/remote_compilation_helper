@@ -25,7 +25,9 @@ import uuid
 
 POLL_SECONDS = 0.25
 FREE_SAMPLE_DEADLINE = 1.0
-SCAN_INTERVAL = 2.0
+# Was 2.0. Each full walk of a large cargo target cost 1-2 s of CPU per
+# build; the per-build output check now runs every 10 s. Free-space sampling (POLL_SECONDS) is unchanged.
+SCAN_INTERVAL = 10.0
 SCAN_DEADLINE = 30.0
 HEARTBEAT_DEADLINE = 3.0
 EXIT_BUDGET = 120
