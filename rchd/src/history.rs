@@ -191,7 +191,25 @@ pub(crate) const LIVE_CHECKOUT_FENCE_MAX_AGE: Duration = Duration::from_secs(6 *
 /// build; without a fence every placement there waits 60 s and is refused.
 /// The fence is short because most holders finish: a worker still held when
 /// it lapses costs one more probe, whose refusal fences it again.
-pub(crate) const SOURCE_BUSY_FENCE_MAX_AGE: Duration = Duration::from_secs(15 * 60);
+///
+/// 15 minutes was far too long on a shared checkout. One source-lock wait that timed out under load fenced the whole
+/// project off the only worker for 15 minutes while its other source pairs were free, and every build in that project
+/// was refused for the duration. Default 2 minutes; the environment
+/// variable `RCH_SOURCE_BUSY_FENCE_SECS` (10..=3600) tunes it for rchd.
+pub(crate) const SOURCE_BUSY_FENCE_DEFAULT_AGE: Duration = Duration::from_secs(2 * 60);
+
+/// The age after which a source-busy fence lapses (see [`SOURCE_BUSY_FENCE_DEFAULT_AGE`]).
+pub(crate) fn source_busy_fence_max_age() -> Duration {
+    static AGE: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *AGE.get_or_init(|| {
+        rch_common::tunable_secs_env(
+            "RCH_SOURCE_BUSY_FENCE_SECS",
+            SOURCE_BUSY_FENCE_DEFAULT_AGE,
+            Duration::from_secs(10),
+            Duration::from_secs(3600),
+        )
+    })
+}
 
 fn canonical_local_wrapper(wrapper: &str) -> bool {
     wrapper
@@ -1602,7 +1620,7 @@ impl BuildHistory {
             .source_busy_fences
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        fences.retain(|_, created| created.elapsed() < SOURCE_BUSY_FENCE_MAX_AGE);
+        fences.retain(|_, created| created.elapsed() < source_busy_fence_max_age());
         if fences.len() >= SOURCE_FENCE_LIMIT {
             return;
         }
@@ -1618,7 +1636,7 @@ impl BuildHistory {
             .source_busy_fences
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        fences.retain(|_, created| created.elapsed() < SOURCE_BUSY_FENCE_MAX_AGE);
+        fences.retain(|_, created| created.elapsed() < source_busy_fence_max_age());
         fences
             .keys()
             .filter(|(project, _)| project == project_id)
@@ -3625,7 +3643,7 @@ mod tests {
         assert!(history.source_busy_fenced_workers("other").is_empty());
         // Live-checkout fences are a separate verdict with a longer life.
         assert!(history.live_checkout_fenced_workers("mtdt").is_empty());
-        let expired = Instant::now() - SOURCE_BUSY_FENCE_MAX_AGE;
+        let expired = Instant::now() - source_busy_fence_max_age();
         for worker in ["vmi1293453", "vmi1264463"] {
             *history
                 .source_busy_fences

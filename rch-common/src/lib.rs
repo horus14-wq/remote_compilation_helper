@@ -12,6 +12,58 @@ mod remote_scoped_launch;
 /// Shared Linux launch and cancellation protocol; callers select their receipt.
 pub use remote_scoped_launch::REMOTE_PROCESS_IDENTITY_SCRIPT;
 
+/// A wait or deadline in seconds that an operator may tune through the environment, clamped to `min..=max`.
+///
+/// An unset, empty or unparsable value gives `default`; a parsable one outside the range is clamped, so a typo cannot
+/// disable a bound or make it absurd. The knob exists because a fixed 30 s or 60 s wait that is right on an idle
+/// worker times out under load, and a timeout in the wrong place fences a whole project.
+pub fn tunable_secs(
+    value: Option<&str>,
+    default: std::time::Duration,
+    min: std::time::Duration,
+    max: std::time::Duration,
+) -> std::time::Duration {
+    match value.and_then(|v| v.trim().parse::<u64>().ok()) {
+        Some(secs) => std::time::Duration::from_secs(secs).clamp(min, max),
+        None => default,
+    }
+}
+
+/// [`tunable_secs`] reading the environment variable `name`.
+pub fn tunable_secs_env(
+    name: &str,
+    default: std::time::Duration,
+    min: std::time::Duration,
+    max: std::time::Duration,
+) -> std::time::Duration {
+    tunable_secs(std::env::var(name).ok().as_deref(), default, min, max)
+}
+
+#[cfg(test)]
+mod tunable_secs_tests {
+    use super::tunable_secs;
+    use std::time::Duration;
+
+    const DEFAULT: Duration = Duration::from_secs(120);
+    const MIN: Duration = Duration::from_secs(10);
+    const MAX: Duration = Duration::from_secs(900);
+
+    #[test]
+    fn unset_empty_and_garbage_give_the_default() {
+        for value in [None, Some(""), Some("  "), Some("soon"), Some("-5"), Some("1.5")] {
+            assert_eq!(tunable_secs(value, DEFAULT, MIN, MAX), DEFAULT, "{value:?}");
+        }
+    }
+
+    #[test]
+    fn a_number_is_used_and_clamped_to_the_range() {
+        assert_eq!(tunable_secs(Some("300"), DEFAULT, MIN, MAX), Duration::from_secs(300));
+        assert_eq!(tunable_secs(Some(" 45 "), DEFAULT, MIN, MAX), Duration::from_secs(45));
+        assert_eq!(tunable_secs(Some("0"), DEFAULT, MIN, MAX), MIN);
+        assert_eq!(tunable_secs(Some("99999"), DEFAULT, MIN, MAX), MAX);
+    }
+}
+
 pub mod admission_preview;
 pub mod admission_recommendation;
 pub mod admission_rejection;

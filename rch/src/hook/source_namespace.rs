@@ -22,7 +22,17 @@ const PATHS: &str = include_str!("source_namespace_paths.sh");
 const ADMISSION: &str = include_str!("source_claim_admission.sh");
 const CLAIMS: &str = include_str!("source_claim_registry.sh");
 const CONTROL: &str = include_str!("source_namespace_control.sh");
-const SOURCE_ADMISSION_WAIT: Duration = Duration::from_secs(60);
+/// How long a build waits for another owner's source locks before it gives up with `SourceAuthorityBusy` (which
+/// fences the project in rchd). Default 180 s, up from a fixed 60 s that loaded workers exceeded; the environment
+/// variable `RCH_SOURCE_ADMISSION_WAIT_SECS` (10..=1800) tunes it.
+fn source_admission_wait() -> Duration {
+    rch_common::tunable_secs_env(
+        "RCH_SOURCE_ADMISSION_WAIT_SECS",
+        Duration::from_secs(180),
+        Duration::from_secs(10),
+        Duration::from_secs(1800),
+    )
+}
 
 /// A completed namespace verdict proved that this worker's existing physical
 /// roots cannot satisfy the requested topology. Another worker may serve the
@@ -171,7 +181,7 @@ pub(super) async fn acquire_source_authority_with_retry(
     identity: &str,
     wait_timeout: Duration,
 ) -> anyhow::Result<RemoteSourceAuthorityLock> {
-    let deadline = tokio::time::Instant::now() + wait_timeout.min(SOURCE_ADMISSION_WAIT);
+    let deadline = tokio::time::Instant::now() + wait_timeout.min(source_admission_wait());
     loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {

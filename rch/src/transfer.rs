@@ -1240,6 +1240,19 @@ impl std::fmt::Display for LiveCheckoutRefused {
 
 impl std::error::Error for LiveCheckoutRefused {}
 
+/// Deadline for the worker-side artifact probes that retrieval and `rch jobs recover` run before they fetch anything
+/// (the cargo evidence read and the artifact header preflight). It was a fixed 30 s, which a loaded worker misses, so
+/// `rch jobs recover` timed out and dead leases could not be settled.
+/// Default 120 s; `RCH_ARTIFACT_PROBE_SECS` (10..=900) tunes it.
+pub(crate) fn artifact_probe_deadline() -> Duration {
+    rch_common::tunable_secs_env(
+        "RCH_ARTIFACT_PROBE_SECS",
+        Duration::from_secs(120),
+        Duration::from_secs(10),
+        Duration::from_secs(900),
+    )
+}
+
 /// Another owner kept this worker's source authority past the admission wait
 /// (bd-p3kuz): a lock wait timed out or an overlapping durable claim never
 /// retired. The holder is often a client that is alive but stopped (SIGSTOP by
@@ -3962,7 +3975,7 @@ impl TransferPipeline {
             expected_exit,
             log,
         );
-        let deadline = Duration::from_secs(30);
+        let deadline = artifact_probe_deadline();
         let script = self.source_activity_rpc_script(&script, deadline);
         let command = self.worker_ssh_command_with_activity(worker, &["sh", "-s"], false);
         collect_cargo_artifact_evidence(
@@ -4350,9 +4363,18 @@ impl TransferPipeline {
         checksummed: bool,
     ) -> Result<RetrievalPlan> {
         let fallback = self.effective_rsync_retry_config();
+        // The size estimate is an rsync dry run over the whole selected tree. It ran on the general transfer budget
+        // (30 s here), which a `cargo build` target sync on a loaded worker exceeds, so `rch jobs recover` failed and a
+        // finished job's lease could never be settled. Give the estimate
+        // alone at least the artifact-probe deadline; the retrieval itself keeps the configured budget. It is a
+        // `max`, so a knob below the configured budget does not lower the estimate's budget (it only raises it).
+        let mut estimate_retry = fallback.clone();
+        estimate_retry.total_timeout_ms = estimate_retry.total_timeout_ms.max(
+            u64::try_from(artifact_probe_deadline().as_millis()).unwrap_or(u64::MAX),
+        );
         let estimate = self
             .execute_retrieval_rsync(
-                &fallback,
+                &estimate_retry,
                 "estimate_artifact_retrieval",
                 || {
                     let mut cmd = command();
@@ -8837,7 +8859,7 @@ exit \"$__s\"; }}; }} 3>&2 4>&1",
         // root. A missing/unreadable candidate is not evidence of compatibility.
         let cargo_target_root = self.remote_cargo_target_dir();
         let script = artifact_header_probe_script(&remote, Some(&cargo_target_root), &paths)?;
-        let deadline = Duration::from_secs(30);
+        let deadline = artifact_probe_deadline();
         let script = self.source_activity_rpc_script(&script, deadline);
         let mut command = self.worker_ssh_command_with_activity(worker, &["sh", "-s"], false);
         command

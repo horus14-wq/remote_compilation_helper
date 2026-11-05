@@ -4343,7 +4343,7 @@ async fn handle_release_worker_from(
             info!(
                 project_id = %rec.project_id,
                 worker_id = %release_worker_id,
-                minutes = crate::history::SOURCE_BUSY_FENCE_MAX_AGE.as_secs() / 60,
+                seconds = crate::history::source_busy_fence_max_age().as_secs(),
                 "Keeping project off worker: another owner holds its source there (bd-p3kuz)"
             );
         }
