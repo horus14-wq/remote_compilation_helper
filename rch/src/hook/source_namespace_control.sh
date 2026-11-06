@@ -2,6 +2,11 @@
 # namespace setup or finite source-ownership metadata, never a build workload.
 # Every result requires settled descendant teardown, including empty replies.
 set -eu
+# RCH_TIMING_SCALE_PCT (whole percent, set by the RCH client from RCH_TIMING_SCALE) multiplies the two
+# deadlines below. Anything but 100..1000 means 100.
+rch_timing_pct=${RCH_TIMING_SCALE_PCT:-100}
+case "$rch_timing_pct" in ''|*[!0-9]*|0*) rch_timing_pct=100;; esac
+{ [ "${#rch_timing_pct}" -le 4 ] && [ "$rch_timing_pct" -ge 100 ] && [ "$rch_timing_pct" -le 1000 ]; } || rch_timing_pct=100
 rch_control_ready=${1:-RCH_TOPOLOGY_OK}
 rch_control_alternate=
 rch_control_third=
@@ -60,7 +65,7 @@ def kill_owned_group():
 
 try:
     if (len(sys.argv) < 4 or sys.argv[1] != "--kill-after=1"
-            or sys.argv[2] not in ("1", "2", "15")
+            or not (sys.argv[2].isdigit() and sys.argv[2].isascii() and 1 <= int(sys.argv[2]) <= 150)
             or sys.platform not in ("linux", "darwin")):
         os._exit(73)
     os.setsid()
@@ -250,7 +255,7 @@ exec 3<&0
 # EOF is insufficient: a grandchild can close both pipes and retain a mutex or
 # continue mutating the namespace after its parent exits. Always tear down the
 # execution group, on success as well as failure, before forwarding readiness.
-rch_namespace_observed_timer teardown --kill-after=1 15 sh -c '
+rch_namespace_observed_timer teardown --kill-after=1 "$((15 * rch_timing_pct / 100))" sh -c '
 set -eu
 control=$1
 observer=$2
@@ -348,7 +353,7 @@ set -e
 }
 # Delivery has its own deadline, too. A stalled SSH reader must not leave the
 # observer or its pipe writers alive. This group has no namespace mutators.
-rch_namespace_observed_timer status --kill-after=1 2 sh -c '
+rch_namespace_observed_timer status --kill-after=1 "$((2 * rch_timing_pct / 100))" sh -c '
 set -eu
 # Keep the timer alive until group KILL even when a pipe writer ignores TERM.
 # Otherwise GNU timeout can reap this shell while that descendant is blocked.

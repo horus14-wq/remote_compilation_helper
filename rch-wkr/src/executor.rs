@@ -578,7 +578,11 @@ pub async fn execute_with_disk_budget(
             .env("CARGO_TARGET_DIR", &target)
             .env("TMPDIR", &temporary)
             .env("TMP", &temporary)
-            .env("TEMP", &temporary);
+            .env("TEMP", &temporary)
+            .env(
+                "RCH_TIMING_SCALE_PCT",
+                rch_common::timing_scale_percent().to_string(),
+            );
         disk_receipt = Some((receipt, marker, budget));
         guarded
     } else {

@@ -1369,7 +1369,7 @@ fn build_remote_kill_script(remote_pgid_file: Option<&str>, build_id: u64) -> St
     };
     let protocol = format!(
         "{}\n{}",
-        rch_common::REMOTE_PROCESS_IDENTITY_SCRIPT,
+        rch_common::remote_process_identity_script(),
         REMOTE_CANCELLATION_SCRIPT
     );
     format!(

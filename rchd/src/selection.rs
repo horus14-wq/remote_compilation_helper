@@ -2323,7 +2323,7 @@ impl WorkerSelector {
             handles.push(tokio::spawn(async move {
                 let capabilities = crate::health::probe_worker_capabilities(
                     &worker,
-                    TOOLCHAIN_PREFLIGHT_COMMAND_TIMEOUT,
+                    rch_common::scaled(TOOLCHAIN_PREFLIGHT_COMMAND_TIMEOUT),
                     ssh_pool.as_ref(),
                 )
                 .await?;
@@ -4671,8 +4671,8 @@ async fn probe_worker_toolchain(
     ssh_pool: Option<&Arc<rch_common::SshPool>>,
 ) -> Result<(), String> {
     let ssh_options = SshOptions {
-        connect_timeout: TOOLCHAIN_PREFLIGHT_CONNECT_TIMEOUT,
-        command_timeout: TOOLCHAIN_PREFLIGHT_COMMAND_TIMEOUT,
+        connect_timeout: rch_common::scaled(TOOLCHAIN_PREFLIGHT_CONNECT_TIMEOUT),
+        command_timeout: rch_common::scaled(TOOLCHAIN_PREFLIGHT_COMMAND_TIMEOUT),
         control_master: false,
         ..Default::default()
     };
@@ -4689,7 +4689,7 @@ async fn probe_worker_toolchain(
         pool.run_with_timeout(
             &worker_config,
             &command,
-            TOOLCHAIN_PREFLIGHT_COMMAND_TIMEOUT,
+            rch_common::scaled(TOOLCHAIN_PREFLIGHT_COMMAND_TIMEOUT),
         )
         .await
         .map_err(|err| format!("toolchain_preflight_connect_failed:{err}"))

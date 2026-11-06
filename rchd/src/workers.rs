@@ -3057,11 +3057,11 @@ async fn refresh_worker_capabilities_for_worker(
     worker: Arc<WorkerState>,
 ) -> WorkerCapabilitiesRefreshInfo {
     let probe = tokio::time::timeout(
-        CAPABILITIES_REFRESH_WORKER_BUDGET,
+        rch_common::scaled(CAPABILITIES_REFRESH_WORKER_BUDGET),
         // On-demand capability refresh (the `rch workers capabilities` API path)
         // uses a throwaway SSH session — it is a low-frequency operator query, not
         // one of the ~30s periodic poll loops the shared pool exists to de-flood.
-        probe_worker_capabilities(&worker, CAPABILITIES_REFRESH_PROBE_TIMEOUT, None),
+        probe_worker_capabilities(&worker, rch_common::scaled(CAPABILITIES_REFRESH_PROBE_TIMEOUT), None),
     )
     .await;
 
@@ -3072,7 +3072,7 @@ async fn refresh_worker_capabilities_for_worker(
         ),
         Err(_) => WorkerCapabilitiesRefreshInfo::cached_after_probe_failure(format!(
             "capabilities probe exceeded {}s response budget; returning cached capability snapshot",
-            CAPABILITIES_REFRESH_WORKER_BUDGET.as_secs()
+            rch_common::scaled(CAPABILITIES_REFRESH_WORKER_BUDGET).as_secs()
         )),
     }
 }

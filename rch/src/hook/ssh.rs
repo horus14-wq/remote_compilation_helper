@@ -1485,7 +1485,8 @@ async fn run_source_metadata_rpc(
     client_timeout: Duration,
 ) -> anyhow::Result<Output> {
     let controller = format!(
-        "set -- {}\n{}",
+        "{}set -- {}\n{}",
+        rch_common::timing_scale_export_line(),
         shell_escape::escape(contract.into()),
         include_str!("source_namespace_control.sh"),
     );
@@ -4224,7 +4225,8 @@ assert not namespace['direct_topology'](['/first', '/alias'], '/first')
             let remote = build_remote_shell_command(
                 WorkerPlatform::Posix,
                 &format!(
-                    "set -- {contract}\n{}",
+                    "{}set -- {contract}\n{}",
+                    rch_common::timing_scale_export_line(),
                     include_str!("source_namespace_control.sh")
                 ),
             );

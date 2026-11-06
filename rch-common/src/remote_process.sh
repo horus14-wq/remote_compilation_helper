@@ -4,6 +4,12 @@ set -f
 # Fixed printf/stat formats use double quotes: four transport layers multiply
 # literal apostrophes and must fit the existing 110 KB argument budget.
 
+# RCH_TIMING_SCALE_PCT (whole percent, set by the RCH client from RCH_TIMING_SCALE) multiplies the
+# observation deadlines and settle polls below. Anything but 100..1000 means 100.
+rch_timing_pct=${RCH_TIMING_SCALE_PCT:-100}
+case "$rch_timing_pct" in ''|*[!0-9]*|0*) rch_timing_pct=100;; esac
+{ [ "${#rch_timing_pct}" -le 4 ] && [ "$rch_timing_pct" -ge 100 ] && [ "$rch_timing_pct" -le 1000 ]; } || rch_timing_pct=100
+
 rch_valid_pgid() {
     case "$1" in ''|*[!0-9]*|0*|1) return 1;; esac
     [ "${#1}" -le 10 ] && [ "$1" -le 2147483647 ]
@@ -482,7 +488,7 @@ rch_remote_cancel_loaded() (
     # Darwin identity observations must use the same storage-independent path.
     export rch_control_diskless
     rch_observation_clock_checked || return 44
-    rch_cancel_deadline=$((rch_observation_now + 3000))
+    rch_cancel_deadline=$((rch_observation_now + 3000 * rch_timing_pct / 100))
     if [ -n "${rch_observation_deadline:-}" ]; then
         case "$rch_observation_deadline" in ''|*[!0-9]*|0[0-9]*) return 44;; esac
         [ "${#rch_observation_deadline}" -le 15 ] || return 44
@@ -551,7 +557,7 @@ rch_remote_cancel_loaded() (
     rch_unknown_attempts=0
     rch_last_state=2
     # Budgeted settling polls; unknown gets at most three attempts.
-    rch_attempt_limit=20
+    rch_attempt_limit=$((20 * rch_timing_pct / 100))
     while [ "$rch_attempt" -lt "$rch_attempt_limit" ]; do
         rch_observation_clock_checked || return 44
         [ "$rch_observation_now" -lt "$rch_observation_deadline" ] || return 44
@@ -1239,7 +1245,7 @@ rch_scope_bind_created() {
     # changed identity. Keep the payload gate closed throughout the retries.
     (
         rch_observation_clock_checked || exit 1
-        rch_probe_deadline=$((rch_observation_now + 3000))
+        rch_probe_deadline=$((rch_observation_now + 3000 * rch_timing_pct / 100))
         if [ -n "${rch_observation_deadline:-}" ]; then
             case "$rch_observation_deadline" in ''|*[!0-9]*|0[0-9]*) exit 1;; esac
             [ "${#rch_observation_deadline}" -le 15 ] || exit 1

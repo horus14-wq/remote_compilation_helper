@@ -1809,7 +1809,7 @@ fn remote_build_watchdog_script() -> String {
 fn remote_build_watchdog_script_with_refusal(refusal: &str) -> String {
     format!(
         "{}\nrch_remote_record \"$1\" \"$4\" || {{ {refusal}; }}\n{}",
-        rch_common::REMOTE_PROCESS_IDENTITY_SCRIPT,
+        rch_common::remote_process_identity_script(),
         r#"__p=$$; __t="$2"; __m="$3"; shift 4
 __cancelled=0; __w=; __watch_start=
 trap '__cancelled=1' TERM
@@ -3559,7 +3559,8 @@ impl TransferPipeline {
                 // stream. Server arguments are appended by rsync after this
                 // fragment and forwarded unchanged through the activity fence.
                 format!(
-                    "python3 -I -S -c {} {} {} {} {} {} standalone rsync",
+                    "{}python3 -I -S -c {} {} {} {} {} {} standalone rsync",
+                    rch_common::timing_scale_env_prefix(),
                     escape(Cow::Borrowed(rch_common::REMOTE_BUILD_DISK_MONITOR_SCRIPT)),
                     budget.max_growth_bytes,
                     budget.min_free_bytes,
@@ -5851,8 +5852,8 @@ impl TransferPipeline {
         let refusal =
             self.disk_prestart_refusal("worker Python disk supervisor is unavailable", 120);
         let program = format!(
-            "if ! command -v python3 >/dev/null 2>&1; then {refusal}; fi; python3 -I -S -c {script} {} {} {marker} {target} {plan} {mode} sh -lc {command}",
-            budget.max_growth_bytes, budget.min_free_bytes,
+            "if ! command -v python3 >/dev/null 2>&1; then {refusal}; fi; {}python3 -I -S -c {script} {} {} {marker} {target} {plan} {mode} sh -lc {command}",
+            rch_common::timing_scale_env_prefix(), budget.max_growth_bytes, budget.min_free_bytes,
         );
         // This composition can exceed the single-argument limit independently
         // of the outer session wrapper, even when each embedded program fits.
@@ -8115,7 +8116,7 @@ exit \"$__s\"; }}; }} 3>&2 4>&1",
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
         };
 
-        match tokio::time::timeout(REMOTE_TIMEOUT_KILL_BUDGET, attempt).await {
+        match tokio::time::timeout(rch_common::scaled(REMOTE_TIMEOUT_KILL_BUDGET), attempt).await {
             Ok(Ok(stdout)) => match parse_remote_timeout_kill_output(&stdout) {
                 Some(RemoteTimeoutCleanup::Verified) => (
                     RemoteTimeoutCleanup::Verified,
@@ -8137,7 +8138,7 @@ exit \"$__s\"; }}; }} 3>&2 4>&1",
                 RemoteTimeoutCleanup::Unverified,
                 format!(
                     "kill probe exceeded {}s budget",
-                    REMOTE_TIMEOUT_KILL_BUDGET.as_secs()
+                    rch_common::scaled(REMOTE_TIMEOUT_KILL_BUDGET).as_secs()
                 ),
             ),
         }

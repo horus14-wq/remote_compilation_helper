@@ -88,19 +88,23 @@ async fn read_completion_with_retry(
     .await
 }
 
-/// Up to three probe attempts, sleeping `backoff` then twice that between
-/// failures (1 s and 2 s in production).
+/// Probe attempts, sleeping `backoff` then twice that, three times that, and so on between failures, while the total
+/// sleep stays within three times `backoff` scaled by `RCH_TIMING_SCALE`: three attempts with 1 s and
+/// 2 s sleeps in production at scale 1, more attempts over a longer window on a slow link.
 async fn retry_completion_probe(
     backoff: Duration,
     mut probe: impl AsyncFnMut() -> anyhow::Result<Option<i32>>,
 ) -> anyhow::Result<Option<i32>> {
-    const ATTEMPTS: u64 = 3;
-    let mut attempt = 1;
+    let budget = rch_common::scaled(backoff * 3);
+    let mut slept = Duration::ZERO;
+    let mut attempt: u32 = 1;
     loop {
         match probe().await {
-            Err(error) if attempt < ATTEMPTS => {
+            Err(error) if slept + backoff * attempt <= budget => {
                 warn!(attempt, %error, "completion probe failed; retrying");
-                tokio::time::sleep(backoff * u32::try_from(attempt).unwrap_or(1)).await;
+                let pause = backoff * attempt;
+                tokio::time::sleep(pause).await;
+                slept += pause;
                 attempt += 1;
             }
             other => return other,

@@ -663,7 +663,7 @@ async fn poll_worker(
     } else {
         "throwaway-ssh"
     };
-    let ssh_timeout = config.ssh_timeout;
+    let ssh_timeout = rch_common::scaled(config.ssh_timeout);
     poll_worker_with(worker, store, config, transport, move |endpoint| {
         collect_telemetry_for_endpoint(endpoint, ssh_timeout, ssh_pool.clone())
     })
@@ -691,10 +691,11 @@ where
     // neither mix old failures with a new host nor admit late old telemetry.
     let endpoint = worker.endpoint_snapshot().await;
     let worker_id = &endpoint.config.id;
-    let per_attempt = poll_hard_timeout(config.ssh_timeout);
+    let per_attempt = poll_hard_timeout(rch_common::scaled(config.ssh_timeout));
+    let attempts = rch_common::scaled_count(TELEMETRY_POLL_ATTEMPTS);
     let mut failures: Vec<PollAttemptFailure> = Vec::new();
 
-    for attempt in 1..=TELEMETRY_POLL_ATTEMPTS {
+    for attempt in 1..=attempts {
         if worker.lock_current_endpoint(&endpoint).await.is_none() {
             return false;
         }
@@ -748,9 +749,9 @@ where
         }
         drop(publication);
         drop(endpoint_guard);
-        if attempt < TELEMETRY_POLL_ATTEMPTS
+        if attempt < attempts
             && admission
-                .run(tokio::time::sleep(TELEMETRY_RETRY_BACKOFF))
+                .run(tokio::time::sleep(rch_common::scaled(TELEMETRY_RETRY_BACKOFF)))
                 .await
                 .is_none()
         {
@@ -766,7 +767,7 @@ where
     };
     warn!(
         worker = worker_id.as_str(),
-        attempts = TELEMETRY_POLL_ATTEMPTS,
+        attempts,
         "Telemetry poll failed: {}",
         render_poll_failures(&failures)
     );

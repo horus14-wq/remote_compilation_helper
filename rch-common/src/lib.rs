@@ -39,6 +39,80 @@ pub fn tunable_secs_env(
     tunable_secs(std::env::var(name).ok().as_deref(), default, min, max)
 }
 
+/// Lowest and highest accepted `RCH_TIMING_SCALE`.
+pub const TIMING_SCALE_MIN: f64 = 1.0;
+/// See [`TIMING_SCALE_MIN`].
+pub const TIMING_SCALE_MAX: f64 = 10.0;
+
+/// Parses an `RCH_TIMING_SCALE` value. Unset, empty, non-numeric, non-finite or outside
+/// [`TIMING_SCALE_MIN`]..=[`TIMING_SCALE_MAX`] gives 1.0 (never a clamp, so a typo cannot make a deadline absurd).
+pub fn parse_timing_scale(value: Option<&str>) -> f64 {
+    value
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| v.is_finite() && (TIMING_SCALE_MIN..=TIMING_SCALE_MAX).contains(v))
+        .unwrap_or(1.0)
+}
+
+/// The single multiplier for every fixed deadline that is too tight for a slow, loaded worker.
+/// Environment variable `RCH_TIMING_SCALE`, 1..=10, default 1 (upstream timing). Read once per process.
+pub fn timing_scale() -> f64 {
+    static SCALE: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *SCALE.get_or_init(|| parse_timing_scale(std::env::var("RCH_TIMING_SCALE").ok().as_deref()))
+}
+
+/// `base` multiplied by [`timing_scale`].
+pub fn scaled(base: std::time::Duration) -> std::time::Duration {
+    base.mul_f64(timing_scale())
+}
+
+/// A retry count turned into a bound that grows with the scale: `base` attempts times the scale, rounded up.
+pub fn scaled_count(base: u32) -> u32 {
+    (f64::from(base) * timing_scale()).ceil() as u32
+}
+
+/// The scale as a whole percent (100 = 1.0), the form the embedded shell and Python programs read from
+/// `RCH_TIMING_SCALE_PCT`.
+pub fn timing_scale_percent() -> u32 {
+    (timing_scale() * 100.0).round() as u32
+}
+
+/// `RCH_TIMING_SCALE_PCT=<n> ` to put in front of a command that runs one of the embedded programs on a worker, so the
+/// program sees the same scale as this process. Empty at scale 1 (programs default to 100).
+pub fn timing_scale_env_prefix() -> String {
+    match timing_scale_percent() {
+        100 => String::new(),
+        pct => format!("RCH_TIMING_SCALE_PCT={pct} "),
+    }
+}
+
+/// A shell line that exports `RCH_TIMING_SCALE_PCT` to put in front of an embedded worker program (empty at scale 1).
+pub fn timing_scale_export_line() -> String {
+    match timing_scale_percent() {
+        100 => String::new(),
+        pct => format!("RCH_TIMING_SCALE_PCT={pct}; export RCH_TIMING_SCALE_PCT\n"),
+    }
+}
+
+/// [`REMOTE_PROCESS_IDENTITY_SCRIPT`] preceded by [`timing_scale_export_line`]. Production callers use this.
+pub fn remote_process_identity_script() -> String {
+    format!("{}{}", timing_scale_export_line(), REMOTE_PROCESS_IDENTITY_SCRIPT)
+}
+
+#[cfg(test)]
+mod timing_scale_tests {
+    use super::parse_timing_scale;
+
+    #[test]
+    fn bad_values_give_one_and_good_values_are_used() {
+        for value in [None, Some(""), Some("fast"), Some("nan"), Some("inf"), Some("0.5"), Some("0"), Some("-2"), Some("11")] {
+            assert!((parse_timing_scale(value) - 1.0).abs() < f64::EPSILON, "{value:?}");
+        }
+        assert!((parse_timing_scale(Some(" 2.5 ")) - 2.5).abs() < f64::EPSILON);
+        assert!((parse_timing_scale(Some("10")) - 10.0).abs() < f64::EPSILON);
+        assert!((parse_timing_scale(Some("1")) - 1.0).abs() < f64::EPSILON);
+    }
+}
+
 #[cfg(test)]
 mod tunable_secs_tests {
     use super::tunable_secs;

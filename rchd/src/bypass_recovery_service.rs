@@ -90,20 +90,20 @@ fn process_observation_required(record: &BypassRecord) -> bool {
 
 fn recovery_capability_timeout(config: &BypassRecoveryConfig, record: &BypassRecord) -> Duration {
     if process_observation_required(record) {
-        config.probe_timeout.max(BUSY_WORKER_CONTROL_TIMEOUT)
+        config.probe_timeout.max(rch_common::scaled(BUSY_WORKER_CONTROL_TIMEOUT))
     } else {
         config.probe_timeout
     }
 }
 
 fn recovery_canary_timeout(config: &BypassRecoveryConfig) -> Duration {
-    config.probe_timeout.max(BUSY_WORKER_CONTROL_TIMEOUT)
+    config.probe_timeout.max(rch_common::scaled(BUSY_WORKER_CONTROL_TIMEOUT))
 }
 
 fn recovery_probe_deadline(config: &BypassRecoveryConfig, record: &BypassRecord) -> Duration {
     let capability = recovery_capability_timeout(config, record).saturating_mul(2);
     if process_observation_required(record) {
-        capability.saturating_add(PROCESS_OBSERVATION_PROBE_TIMEOUT)
+        capability.saturating_add(rch_common::scaled(PROCESS_OBSERVATION_PROBE_TIMEOUT))
     } else {
         capability
     }
@@ -112,7 +112,7 @@ fn recovery_probe_deadline(config: &BypassRecoveryConfig, record: &BypassRecord)
 fn process_observation_probe_command() -> String {
     format!(
         "{}\nrch_process_health_probe",
-        rch_common::REMOTE_PROCESS_IDENTITY_SCRIPT,
+        rch_common::remote_process_identity_script(),
     )
 }
 
@@ -362,8 +362,8 @@ impl SshRecoveryProber {
     async fn process_observation_probe(&self, config: &WorkerConfig) -> bool {
         let probe = async {
             let options = SshOptions {
-                connect_timeout: self.config.probe_timeout.max(BUSY_WORKER_CONTROL_TIMEOUT),
-                command_timeout: PROCESS_OBSERVATION_PROBE_TIMEOUT,
+                connect_timeout: self.config.probe_timeout.max(rch_common::scaled(BUSY_WORKER_CONTROL_TIMEOUT)),
+                command_timeout: rch_common::scaled(PROCESS_OBSERVATION_PROBE_TIMEOUT),
                 ..Default::default()
             };
             let mut client = SshClient::new(config.clone(), options);
@@ -374,7 +374,7 @@ impl SshRecoveryProber {
             let _ = client.disconnect().await;
             result.is_ok_and(|result| process_observation_probe_passed(&result))
         };
-        tokio::time::timeout(PROCESS_OBSERVATION_PROBE_TIMEOUT, probe)
+        tokio::time::timeout(rch_common::scaled(PROCESS_OBSERVATION_PROBE_TIMEOUT), probe)
             .await
             .unwrap_or(false)
     }

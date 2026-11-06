@@ -29,6 +29,26 @@ MARKER = "RCH_TEST_ATTEMPT_DISK_BUDGET:"
 
 
 class DiskMonitorTests(unittest.TestCase):
+    def test_timing_scale_multiplies_every_deadline_and_rejects_bad_values(self):
+        # RCH_TIMING_SCALE_PCT is whole percent, 100..1000; anything else means 100. Loaded as rch loads the script.
+        program = ("import importlib.util as u; s = u.spec_from_file_location('m', %r); m = u.module_from_spec(s); "
+                   "s.loader.exec_module(m); print(m.FREE_SAMPLE_DEADLINE, m.SCAN_DEADLINE, m.HEARTBEAT_DEADLINE, "
+                   "m.LOCK_DEADLINE, m.ADMIT_DEADLINE, m.SCAN_INTERVAL)" % str(SOURCE))
+
+        def deadlines(value):
+            environment = {key: val for key, val in os.environ.items() if key != "RCH_TIMING_SCALE_PCT"}
+            if value is not None:
+                environment["RCH_TIMING_SCALE_PCT"] = value
+            return subprocess.run([sys.executable, "-I", "-S", "-c", program], env=environment, capture_output=True,
+                                  text=True, check=True).stdout.split()
+
+        today = ["5.0", "30.0", "3.0", "2.0", "5.0", "10.0"]
+        for bad in (None, "", "99", "1001", "abc", "-200", "250.5", "0200", "٢٥٠"):
+            self.assertEqual(deadlines(bad), today, bad)
+        # The scan interval is a poll rate, not a deadline: it never scales.
+        self.assertEqual(deadlines("400"), ["20.0", "120.0", "12.0", "8.0", "20.0", "10.0"])
+        self.assertEqual(deadlines("100"), today)
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux procfs exit race")
     def test_census_tolerates_real_procfs_exit_but_preserves_live_process(self):
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])

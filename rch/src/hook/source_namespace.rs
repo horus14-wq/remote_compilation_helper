@@ -337,7 +337,9 @@ fn namespace_preflight_command(
     // no source grant yet and owns only its read-only guard process group.
     let guard =
         crate::transfer::source_activity_bounded_script("", &guard, Duration::from_secs(30));
-    let controller = shell_escape::escape(CONTROL.into());
+    let controller = shell_escape::escape(
+        format!("{}{CONTROL}", rch_common::timing_scale_export_line()).into(),
+    );
     let mut delimiter = format!("RCH_NAMESPACE_{}", uuid::Uuid::new_v4().simple());
     while initializer.lines().any(|line| line == delimiter) {
         delimiter.push('_');

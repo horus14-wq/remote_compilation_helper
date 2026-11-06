@@ -235,7 +235,7 @@ rch_scope_launch_child() {
         rch_policy_enforce
     }
     rch_observation_clock_checked || exit 125
-    rch_observation_deadline=$((rch_observation_now + 6000))
+    rch_observation_deadline=$((rch_observation_now + 6000 * rch_timing_pct / 100))
     rch_remote_record "$__sl_record" "$__sl_build" || exit 125
     rch_scope_launch_binding_matches || exit 125
     unset rch_observation_deadline rch_observation_last_clock
@@ -431,7 +431,7 @@ rch_scope_launch_finish() {
         __sl_last_clock=$rch_launch_now
         if [ "$__sl_admitted" = 0 ]; then
             # One deadline covers publication and all admission observations.
-            if [ "$((rch_launch_now - __sl_setup_started))" -ge 6000 ]; then
+            if [ "$((rch_launch_now - __sl_setup_started))" -ge "$((6000 * rch_timing_pct / 100))" ]; then
                 [ "$__sl_admission_observations" = 0 ] || __sl_reason=unknown
                 break
             fi
@@ -443,7 +443,7 @@ rch_scope_launch_finish() {
                 rch_remote_leader_matches || { __sl_reason=unknown; break; }
                 if [ $rch_scope_bound = 1 ]; then
                     __sl_admission_observations=$((__sl_admission_observations + 1))
-                    rch_observation_deadline=$((__sl_setup_started + 6000))
+                    rch_observation_deadline=$((__sl_setup_started + 6000 * rch_timing_pct / 100))
                     rch_observation_last_clock=$rch_launch_now
                     rch_scope_operation state
                     __sl_scope_state=$?
@@ -464,7 +464,7 @@ rch_scope_launch_finish() {
                 rch_scope_launch_clock || { __sl_reason=unknown; break; }
                 [ "$rch_launch_now" -ge "$__sl_last_clock" ] || { __sl_reason=unknown; break; }
                 __sl_last_clock=$rch_launch_now
-                if [ "$((rch_launch_now - __sl_setup_started))" -ge 6000 ]; then
+                if [ "$((rch_launch_now - __sl_setup_started))" -ge "$((6000 * rch_timing_pct / 100))" ]; then
                     __sl_reason=unknown; break
                 fi
                 if [ "$__sl_cancelled" = 1 ]; then __sl_reason=cancelled; break; fi
@@ -555,7 +555,7 @@ command eval "$rch_launch_source" || exit 125
 exec 3>&2
 rch_scope_launch_supervise "$@"
 ' rch-process-health "$rch_launch_source" \
-        "$rch_health_dir/receipt" 5 RCH_PROCESS_HEALTH_DEADLINE 0 /bin/sh -c ':' || exit 1
+        "$rch_health_dir/receipt" "$((5 * rch_timing_pct / 100))" RCH_PROCESS_HEALTH_DEADLINE 0 /bin/sh -c ':' || exit 1
     # Only a proven completed attempt can discard its private probe evidence.
     # There are no user paths or recursive deletions in this cleanup.
     rm -f -- "$rch_health_dir/receipt" \

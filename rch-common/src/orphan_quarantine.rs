@@ -102,7 +102,7 @@ pub fn kill_probe_script(pgid_file: &str, build_id: u64) -> String {
          if rch_remote_cancel \"$f\" {build_id} kill; then\n\
          echo RCH_E104_KILL=verified_dead\n\
          else echo RCH_E104_KILL=still_alive; fi\n",
-        identity = crate::REMOTE_PROCESS_IDENTITY_SCRIPT,
+        identity = crate::remote_process_identity_script(),
     )
 }
 

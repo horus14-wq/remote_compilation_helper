@@ -426,7 +426,7 @@ fn build_cleanup_command_with_source_guard(
         active_grace_minutes = active_grace_minutes,
         orphan_after_minutes = orphan_after_minutes,
         empty_run_dir_minutes = empty_run_dir_minutes,
-        identity = rch_common::REMOTE_PROCESS_IDENTITY_SCRIPT,
+        identity = rch_common::remote_process_identity_script(),
         activity_guard = CLEANUP_SOURCE_ACTIVITY_GUARD,
         source_guard = source_guard,
         source_transaction = CLEANUP_SOURCE_TRANSACTION,

@@ -23,16 +23,27 @@ import tempfile
 import time
 import uuid
 
+
+def timing_scale():
+    """RCH_TIMING_SCALE_PCT (whole percent, set by the RCH client from RCH_TIMING_SCALE): 100..1000, bad value -> 1.0."""
+    raw = os.environ.get("RCH_TIMING_SCALE_PCT", "")
+    return int(raw) / 100.0 if raw.isascii() and raw.isdigit() and raw[0] != "0" and 100 <= int(raw) <= 1000 else 1.0
+
+
+# One multiplier for every fixed DEADLINE below (intervals and poll rates are not scaled).
+SCALE = timing_scale()
 POLL_SECONDS = 0.25
 # Was 1.0. Under CPU starvation (load ~40 on 18 cores) one statvfs
 # sample in this Python monitor took >1 s and RCH killed a healthy build with E330 'free-space telemetry deadline'.
 # Samples are still requested every POLL_SECONDS; only the declare-the-monitor-dead deadline is longer.
-FREE_SAMPLE_DEADLINE = 5.0
+FREE_SAMPLE_DEADLINE = 5.0 * SCALE
 # Was 2.0. Each full walk of a large cargo target cost 1-2 s of CPU per
 # build; the per-build output check now runs every 10 s. Free-space sampling (POLL_SECONDS) is unchanged.
 SCAN_INTERVAL = 10.0
-SCAN_DEADLINE = 30.0
-HEARTBEAT_DEADLINE = 3.0
+SCAN_DEADLINE = 30.0 * SCALE
+HEARTBEAT_DEADLINE = 3.0 * SCALE
+LOCK_DEADLINE = 2.0 * SCALE
+ADMIT_DEADLINE = 5.0 * SCALE
 EXIT_BUDGET = 120
 MAX_LEDGER_BYTES = 2 * 1024 * 1024
 MAX_RECEIPT_BYTES = 8192
@@ -470,7 +481,7 @@ class Registry:
         descriptor = os.open(self.root + "/lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         try:
             private_regular(descriptor)
-            deadline = time.monotonic() + 2
+            deadline = time.monotonic() + LOCK_DEADLINE
             while True:
                 try:
                     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -858,7 +869,7 @@ def supervise(budget, floor, marker, target, paths, outputs, receipt_path, comma
         )
         monitor.require_warm_pool(warm_policy)
         monitor.require_runtime_tracking(require_incremental_tracking)
-        bounded_result(executor.submit(monitor.admit), time.monotonic() + 5, heartbeat)
+        bounded_result(executor.submit(monitor.admit), time.monotonic() + ADMIT_DEADLINE, heartbeat)
 
         def interrupted(signum, frame):
             raise BudgetFailure("interrupted", detail="supervisor received signal " + str(signum))
