@@ -7373,6 +7373,12 @@ exit \"$__s\"; }}; }} 3>&2 4>&1",
         } else {
             resolved_rsync.capabilities().resume_args()
         };
+        // Local patch 7 (fleksprime, 10 Nov 2026): compress the clean-overlay base archive on the wire like every
+        // other source transfer (zstd where rsync supports it). The tar is ~120 MB and went up raw: ~37-54 s per
+        // cache miss over a 263 ms AU-EU link, against ~6-10 s compressed (28 MB). The bytes that land are identical.
+        let archive_compression_args = resolved_rsync
+            .capabilities()
+            .compression_args(self.compression_level_for_transfer());
         // A retry may hit a slot published before an SSH acknowledgment was
         // lost. Do not report zero upload bytes when an earlier attempt sent
         // this payload; retain the ordinary payload-size accounting then.
@@ -7394,6 +7400,7 @@ exit \"$__s\"; }}; }} 3>&2 4>&1",
                     let rsync_path = rsync_path.clone();
                     let cache_scripts = cache_scripts.as_ref();
                     let upload_attempted = &upload_attempted;
+                    let archive_compression_args = &archive_compression_args;
                     async move {
                         if let Some((restore, _)) = cache_scripts {
                             let output = self
@@ -7426,6 +7433,7 @@ exit \"$__s\"; }}; }} 3>&2 4>&1",
                             .arg("--no-owner")
                             .arg("--no-group")
                             .args(resume_args)
+                            .args(archive_compression_args)
                             .arg("-e")
                             .arg(ssh_command)
                             .arg("--rsync-path")
