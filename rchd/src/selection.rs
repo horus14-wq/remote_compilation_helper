@@ -61,6 +61,9 @@ const TOOLCHAIN_PREFLIGHT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 /// only candidate (the reactive SIGILL quarantine handles actual faults).
 const PRE_V3_MICROARCH_PENALTY: f64 = 0.5;
 const TOOLCHAIN_PREFLIGHT_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long one selection waits for a capability refresh it triggered (local patch). Not scaled by RCH_TIMING_SCALE:
+/// the probe itself keeps its own, longer timeout and finishes in the background.
+const SELECTION_REFRESH_BUDGET: Duration = Duration::from_secs(4);
 
 /// Weights for the selection scoring algorithm (legacy compatibility).
 #[derive(Debug, Clone)]
@@ -2422,8 +2425,17 @@ impl WorkerSelector {
 
         let requirements = component_request.map(ExecutionRequirements::new);
         let mut any_recovered = false;
+        // Local patch: one selection waits at most SELECTION_REFRESH_BUDGET for the refresh it started. The spawned
+        // probe is not aborted when the wait ends (dropping the JoinHandle detaches it); it keeps running and
+        // publishes the refreshed inventory itself, so the next request is admitted from fresh data. A refresh not seen
+        // to succeed in time recovers nothing, exactly like a failed probe, so admission is never granted from stale or
+        // missing facts. Without this bound, concurrent selections each waited a full SSH probe (1 s or more) and
+        // refused with "all workers failed preflight checks" under many simultaneous clients.
+        let refresh_deadline = tokio::time::Instant::now() + SELECTION_REFRESH_BUDGET;
         for handle in handles {
-            let Ok(Some((worker, capabilities))) = handle.await else {
+            let Ok(Ok(Some((worker, capabilities)))) =
+                tokio::time::timeout_at(refresh_deadline, handle).await
+            else {
                 continue;
             };
             if requirements
