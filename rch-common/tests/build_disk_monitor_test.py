@@ -50,7 +50,7 @@ class TimingScaleTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(json.loads(result.stdout),
                                  [scale, scale, 30 * scale, 3 * scale, 2 * scale,
-                                  5 * scale, 2 * scale, 10 * scale, 0.25, 2])
+                                  5 * scale, 2 * scale, 10 * scale, 0.25, 10])
 
     def test_invalid_and_nonfinite_policy_is_rejected(self):
         for value in ("", "0", "-1", "0.999", "10.01", "nan", "NaN", "inf",

@@ -39,7 +39,10 @@ def parse_timing_scale(value):
 TIMING_SCALE = parse_timing_scale(os.environ.get("RCH_TIMING_SCALE", "1"))
 POLL_SECONDS = 0.25
 FREE_SAMPLE_DEADLINE = 1.0 * TIMING_SCALE
-SCAN_INTERVAL = 2.0
+# Local patch (shared worker, 5 Nov 2026): was 2.0. Each full walk of a large cargo target cost 1-2 s of CPU per running
+# build; the per-build output check now runs every 10 s. Free-space sampling (POLL_SECONDS) is unchanged. A build can
+# overshoot its reservation for up to ~10 s before it is stopped (accepted trade-off).
+SCAN_INTERVAL = 10.0
 SCAN_DEADLINE = 30.0 * TIMING_SCALE
 HEARTBEAT_DEADLINE = 3.0 * TIMING_SCALE
 RESERVATION_LOCK_DEADLINE = 2.0 * TIMING_SCALE
