@@ -203,7 +203,11 @@ pub(crate) const LIVE_CHECKOUT_FENCE_MAX_AGE: Duration = Duration::from_secs(6 *
 /// build; without a fence every placement there waits 60 s and is refused.
 /// The fence is short because most holders finish: a worker still held when
 /// it lapses costs one more probe, whose refusal fences it again.
-pub(crate) const SOURCE_BUSY_FENCE_MAX_AGE: Duration = Duration::from_secs(15 * 60);
+///
+/// Local patch: 2 minutes, not 15. With a single worker a 15-minute fence after one source-busy
+/// refusal leaves no worker for every build in that project, and a stopped client rarely holds the
+/// source that long; a lapsed fence only costs one more probe.
+pub(crate) const SOURCE_BUSY_FENCE_MAX_AGE: Duration = Duration::from_secs(2 * 60);
 
 fn canonical_local_wrapper(wrapper: &str) -> bool {
     wrapper
